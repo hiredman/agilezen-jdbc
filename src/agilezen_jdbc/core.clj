@@ -136,7 +136,8 @@
              [:*]
              (let [expr (.getExpression %)]
                (if (instance? Function expr)
-                 (cons [(.toString expr) @(resolve (symbol (.toLowerCase (.getName expr))))]
+                 (cons [(.toString expr)
+                        @(resolve (symbol (.toLowerCase (.getName expr))))]
                        (map (fn [x] (keyword (where-clause x false)))
                             (seq (.getExpressions (.getParameters expr)))))
                  [(keyword
