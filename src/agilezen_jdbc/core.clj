@@ -35,7 +35,8 @@
   (let [results (->> (http/get (format story-list-url story-id)
                                {:headers {"X-Zen-ApiKey" api-key}
                                 :query-params {"pageSize" 1000
-                                               "where" filters
+                                               "where" (URLEncoder/encode
+                                                        filters)
                                                "with" "tags,tasks"}})
                      :body
                      json/decode)
@@ -154,7 +155,7 @@
         url (when where
               (try
                 (where-clause where true)
-                (catch Exception _)))
+                (catch Exception _ "")))
         filter-fun (if where
                      (eval `(fn [~'record]
                               ~(where-clause where false)))
