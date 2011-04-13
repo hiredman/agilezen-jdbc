@@ -9,8 +9,10 @@
            (net.sf.jsqlparser.statement.select AllColumns Select)
            (net.sf.jsqlparser.expression.operators.relational EqualsTo
                                                               NotEqualsTo)
-           (net.sf.jsqlparser.expression.operators.conditional AndExpression)
-           (net.sf.jsqlparser.expression LongValue Function)
+           (net.sf.jsqlparser.expression.operators.conditional AndExpression
+                                                               OrExpression)
+           (net.sf.jsqlparser.expression LongValue Function NullValue
+                                         Parenthesis)
            (net.sf.jsqlparser.schema Column)
            (net.sf.jsqlparser.statement.update Update)))
 
@@ -83,6 +85,14 @@
             (where-clause (.getLeftExpression and-expr) url?)
             (where-clause (.getRightExpression and-expr) url?))))
 
+(defmethod where-clause OrExpression [and-expr url?]
+  (if-not url?
+    `(or ~(where-clause (.getLeftExpression and-expr) url?)
+          ~(where-clause (.getRightExpression and-expr) url?))
+    (format "(%s) or (%s)"
+            (where-clause (.getLeftExpression and-expr) url?)
+            (where-clause (.getRightExpression and-expr) url?))))
+
 (defmethod where-clause EqualsTo [equals url?]
   (if-not url?
     (let [field (keyword (where-clause (.getLeftExpression equals) url?))
@@ -101,11 +111,20 @@
             (where-clause (.getLeftExpression nequals) url?)
             (where-clause (.getRightExpression nequals) url?))))
 
+(defmethod where-clause Parenthesis [parens url?]
+  (if-not url?
+    (where-clause (.getExpression parens) url?)
+    (format "(%s)" (where-clause (.getExpression parens) url?))))
+
 (defmethod where-clause Column [col url?]
   (read-string (.getColumnName col)))
 
 (defmethod where-clause LongValue [lv url?]
   (.intValue (.getValue lv)))
+
+(defmethod where-clause NullValue [nv url?]
+  (when url?
+    (throw (Exception. "not possible in url"))))
 
 (defmulti execute-sql* (fn [o & _] (type o)))
 
@@ -128,7 +147,10 @@
         table-id (get projects table)
         fields (gimme-fields (.getSelectItems body))
         where (.getWhere body)
-        url (when where (where-clause where true))
+        url (when where
+              (try
+                (where-clause where true)
+                (catch Exception _)))
         filter-fun (if where
                      (eval `(fn [~'record]
                               ~(where-clause where false)))
