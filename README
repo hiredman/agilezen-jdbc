@@ -1,0 +1,27 @@
+# agilezen-jdbc
+
+level 4 jdbc provider built on the agilezen api
+
+## Usage
+
+agilezen-jdbc.core>   (sql/with-connection {:classname driver-class
+                        :subprotocol "agilezen"
+                        :subname "agilezen"
+                        :api-key "..."}
+    (sql/with-query-results results ["SELECT COUNT(id) FROM some_project WHERE color=\"yellow\""]
+      (doall results)))
+({:count(id) 212})
+agilezen-jdbc.core>   (sql/with-connection {:classname driver-class
+                        :subprotocol "agilezen"
+                        :subname "agilezen"
+                        :api-key "..."}
+    (sql/with-query-results results ["SELECT COUNT(id) FROM some_project WHERE color<>\"yellow\""]
+      (doall results)))
+({:count(id) 189})
+agilezen-jdbc.core> 
+
+## License
+
+Copyright (C) 2011 Kevin Downey
+
+Distributed under the Eclipse Public License, the same as Clojure.
