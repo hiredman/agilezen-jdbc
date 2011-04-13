@@ -33,7 +33,8 @@
   (let [results (->> (http/get (format story-list-url story-id)
                                {:headers {"X-Zen-ApiKey" api-key}
                                 :query-params {"pageSize" 1000
-                                               "where" filters}})
+                                               "where" filters
+                                               "with" "tags,tasks"}})
                      :body
                      json/decode)
         total (:totalItems results)]
@@ -45,7 +46,8 @@
                       (assoc :owner (:userName (:owner item)))
                       (assoc :creator (:userName (:creator item)))
                       (assoc :phase (.toLowerCase (:name (:phase item))))
-                      (assoc :project (.toLowerCase (:name (:phase item))))))))
+                      (assoc :project (.toLowerCase (:name (:phase item))))
+                      (assoc :tasks (seq (:tasks item)))))))
       {:count total})))
 
 (defn result-set [[fst & rst :as all]]
