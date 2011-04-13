@@ -102,9 +102,9 @@
     (let [field (keyword (where-clause (.getLeftExpression equals) url?))
           value (where-clause (.getRightExpression equals) url?)]
       `(= (~field ~'record) ~value))
-    (format "%s:%s"
-            (where-clause (.getLeftExpression equals) url?)
-            (where-clause (.getRightExpression equals) url?))))
+    (let [field (where-clause (.getLeftExpression equals) url?)
+          value (where-clause (.getRightExpression equals) url?)]
+      (format "%s:%s" field value))))
 
 (defmethod where-clause NotEqualsTo [nequals url?]
   (if-not url?
