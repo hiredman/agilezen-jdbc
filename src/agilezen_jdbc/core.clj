@@ -88,7 +88,7 @@
 (defmethod where-clause OrExpression [and-expr url?]
   (if-not url?
     `(or ~(where-clause (.getLeftExpression and-expr) url?)
-          ~(where-clause (.getRightExpression and-expr) url?))
+         ~(where-clause (.getRightExpression and-expr) url?))
     (format "(%s) or (%s)"
             (where-clause (.getLeftExpression and-expr) url?)
             (where-clause (.getRightExpression and-expr) url?))))
@@ -178,9 +178,11 @@
         table (.getName (.getTable update))
         table-id (get projects table)
         where (.getWhere update)
-        effected-stories (map :id (resultset-seq (execute-sql (format "SELECT id FROM %s WHERE %s" table (.toString where))
-                                                              api-key
-                                                              projects)))]
+        effected-stories (->> (format "SELECT id FROM %s WHERE %s"
+                                      table (.toString where))
+                              (execute-sql api-key projects)
+                              (map :id)
+                              (resultset-seq))]
     (doseq [id effected-stories]
       (http/put (doto (format story-url table-id id) prn)
                 {:headers {"X-Zen-ApiKey" api-key}
