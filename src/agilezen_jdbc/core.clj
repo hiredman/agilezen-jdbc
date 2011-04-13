@@ -117,6 +117,9 @@
     (format "(%s)" (where-clause (.getExpression parens) url?))))
 
 (defmethod where-clause Column [col url?]
+  (when (and url?
+             (#{"phase" "project" "tasks"} (.getColumnName col)))
+    (throw (Exception.)))
   (read-string (.getColumnName col)))
 
 (defmethod where-clause LongValue [lv url?]
