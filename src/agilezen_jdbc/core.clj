@@ -12,9 +12,10 @@
            (net.sf.jsqlparser.expression.operators.conditional AndExpression
                                                                OrExpression)
            (net.sf.jsqlparser.expression LongValue Function NullValue
-                                         Parenthesis)
+                                         Parenthesis StringValue)
            (net.sf.jsqlparser.schema Column)
-           (net.sf.jsqlparser.statement.update Update)))
+           (net.sf.jsqlparser.statement.update Update)
+           (java.net URLEncoder)))
 
 (def project-list-url "https://agilezen.com/api/v1/projects")
 
@@ -125,6 +126,9 @@
 
 (defmethod where-clause LongValue [lv url?]
   (.intValue (.getValue lv)))
+
+(defmethod where-clause StringValue [sv url?]
+  (.getValue sv))
 
 (defmethod where-clause NullValue [nv url?]
   (when url?
