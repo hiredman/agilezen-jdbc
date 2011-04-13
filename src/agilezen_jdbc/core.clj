@@ -55,7 +55,9 @@
       {:count total})))
 
 (defn result-set [[fst & rst :as all]]
-  (let [column-count (count fst)
+  (let [fst (or fst {:empty nil})
+        all (if (seq all) all [{:empty nil}])
+        column-count (count fst)
         column-idxs (vec (keys fst))
         cursor (atom -1)
         total (dec (count all))]
