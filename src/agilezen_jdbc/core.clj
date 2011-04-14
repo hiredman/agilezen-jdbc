@@ -182,6 +182,8 @@
       (map select-fun
            (filter filter-fun (project-stories api-key table-id url)))))))
 
+(declare execute-sql)
+
 (defmethod execute-sql* Update [update api-key projects]
   (let [keys (map keyword (map where-clause (.getColumns update)))
         values (map where-clause (.getExpressions update))
