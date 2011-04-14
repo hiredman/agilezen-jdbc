@@ -6,14 +6,20 @@
                      PreparedStatement Statement ResultSet
                      ResultSetMetaData)
            (net.sf.jsqlparser.parser CCJSqlParserManager)
-           (net.sf.jsqlparser.statement.select AllColumns Select)
+           (net.sf.jsqlparser.statement StatementVisitor)
+           (net.sf.jsqlparser.statement.select AllColumns PlainSelect
+                                               Select SelectVisitor
+                                               FromItemVisitor
+                                               SelectItemVisitor
+                                               SelectExpressionItem)
            (net.sf.jsqlparser.expression.operators.relational EqualsTo
                                                               NotEqualsTo)
            (net.sf.jsqlparser.expression.operators.conditional AndExpression
                                                                OrExpression)
            (net.sf.jsqlparser.expression LongValue Function NullValue
-                                         Parenthesis StringValue)
-           (net.sf.jsqlparser.schema Column)
+                                         Parenthesis StringValue
+                                         ExpressionVisitor JdbcParameter)
+           (net.sf.jsqlparser.schema Column Table)
            (net.sf.jsqlparser.statement.update Update)
            (java.net URLEncoder)))
 
@@ -23,21 +29,31 @@
 
 (def story-url "https://agilezen.com/api/v1/projects/%s/stories/%s")
 
-(defn project-map [api-key]
+(defn project-map [api-key & [filters]]
   (->> (http/get project-list-url
-                 {:headers {"X-Zen-ApiKey" api-key}})
+                 {:headers {"X-Zen-ApiKey" api-key}
+                  :query-params {"where" filters}})
        :body
        json/decode
        :items
        (map (juxt (comp #(.toLowerCase %) :name) :id))
        (into {})))
 
+(def project-map (memoize project-map))
+
+(defn project-map1 [api-key & [filters]]
+  (->> (http/get project-list-url
+                 {:headers {"X-Zen-ApiKey" api-key}
+                  :query-params {"where" filters}})
+       :body
+       json/decode
+       :items))
+
 (defn project-stories [api-key story-id & [filters]]
   (let [results (->> (http/get (format story-list-url story-id)
                                {:headers {"X-Zen-ApiKey" api-key}
                                 :query-params {"pageSize" 1000
-                                               "where" (URLEncoder/encode
-                                                        filters)
+                                               "where" filters
                                                "with" "tags,tasks"}})
                      :body
                      json/decode)
@@ -79,136 +95,105 @@
           false))
       (close [_]))))
 
-(defmulti where-clause (fn [o & args] (type o)))
+(declare visitor)
 
-(defmethod where-clause AndExpression [and-expr url?]
-  (if-not url?
-    `(and ~(where-clause (.getLeftExpression and-expr) url?)
-          ~(where-clause (.getRightExpression and-expr) url?))
-    (format "(%s) AND (%s)"
-            (where-clause (.getLeftExpression and-expr) url?)
-            (where-clause (.getRightExpression and-expr) url?))))
+(defn accept [item]
+  (let [p (promise)]
+    (.accept item (visitor p))
+    @p))
 
-(defmethod where-clause OrExpression [and-expr url?]
-  (if-not url?
-    `(or ~(where-clause (.getLeftExpression and-expr) url?)
-         ~(where-clause (.getRightExpression and-expr) url?))
-    (format "(%s) or (%s)"
-            (where-clause (.getLeftExpression and-expr) url?)
-            (where-clause (.getRightExpression and-expr) url?))))
+(defn columns [ps]
+  (let [c (map accept (.getSelectItems ps))]
+    (if (= c [:*])
+      c
+      (->> c
+           (map (fn [x] ((:filter x) nil)))
+           (map keyword)))))
 
-(defmethod where-clause EqualsTo [equals url?]
-  (if-not url?
-    (let [field (keyword (where-clause (.getLeftExpression equals) url?))
-          value (where-clause (.getRightExpression equals) url?)]
-      `(= (~field ~'record) ~value))
-    (let [field (where-clause (.getLeftExpression equals) url?)
-          value (where-clause (.getRightExpression equals) url?)]
-      (format "%s:%s" field value))))
+(defn visitor [p]
+  (reify
 
-(defmethod where-clause NotEqualsTo [nequals url?]
-  (if-not url?
-    (let [field (keyword (where-clause (.getLeftExpression nequals) url?))
-          value (where-clause (.getRightExpression nequals) url?)]
-      `(not= (~field ~'record) ~value))
-    (format "not(%s:%s)"
-            (where-clause (.getLeftExpression nequals) url?)
-            (where-clause (.getRightExpression nequals) url?))))
+    StatementVisitor
+    (^void visit [vstr ^Select stmt]
+      (let [b (.getSelectBody stmt)]
+        (.accept b (visitor p))))
 
-(defmethod where-clause Parenthesis [parens url?]
-  (if-not url?
-    (where-clause (.getExpression parens) url?)
-    (format "(%s)" (where-clause (.getExpression parens) url?))))
+    FromItemVisitor
+    (^void visit [vstr ^Table tbl]
+      (deliver p (.getName tbl)))
 
-(defmethod where-clause Column [col url?]
-  (when (and url?
-             (#{"phase" "project" "tasks"} (.getColumnName col)))
-    (throw (Exception.)))
-  (read-string (.getColumnName col)))
+    SelectVisitor
+    (^void visit [vstr ^PlainSelect ps]
+      (deliver
+       p
+       (fn [api-key params]
+         (let [[table] (map accept (.getFromItems ps))
+               columns (columns ps)
+               where (when-let [w (.getWhere ps)]
+                       (accept w))
+               where-url (if where
+                           (try
+                             ((:url where) (atom params))
+                             (catch Exception _ ""))
+                           "")
+               where-filter (if where ((:filter where) (atom params)) "")
+               [table-info] (project-map1 api-key (str "name:" table))
+               table-id (:id table-info)
+               filter-fun (if where-filter
+                            (eval `(fn [~'record] ~where-filter))
+                            (constantly true))
+               select-fun (if (=  columns [:*])
+                            identity
+                            #(select-keys % columns))]
+           (->> (project-stories api-key table-id where-url)
+                (filter filter-fun)
+                (map select-fun))))))
 
-(defmethod where-clause LongValue [lv url?]
-  (.intValue (.getValue lv)))
+    SelectItemVisitor
+    (^void visit [vstr ^AllColumns sei]
+      (p :*))
+    (^void visit [vstr ^SelectExpressionItem sei]
+      (.accept (.getExpression sei)
+               (visitor p)))
 
-(defmethod where-clause StringValue [sv url?]
-  (.getValue sv))
+    ExpressionVisitor
+    (^void visit [vstr ^Column clm]
+      (let [n (.getColumnName clm)]
+        (deliver p {:url (fn [_]
+                           (when (#{"phase"} n)
+                             (throw (Exception.)))
+                           n)
+                    :filter (fn [_] n)})))
+    (^void visit [vstr ^EqualsTo eq]
+      (let [le (accept (.getLeftExpression eq))
+            re (accept (.getRightExpression eq))]
+        (deliver p {:url #(format "%s:%s"
+                                  ((:url le) %)
+                                  ((:url re) %))
+                    :filter (fn [params]
+                              `(= (~(keyword ((:filter le) params)) ~'record)
+                                  ~((:filter re) params)))})))
+    (^void visit [vstr ^StringValue sv]
+      (deliver
+       p
+       {:url (fn [_] (pr-str (.getValue sv)))
+        :filter (fn [_] (.getValue sv))}))
+    (^void visit [vstr ^JdbcParameter param]
+      (deliver
+       p
+       {:url (fn [params]
+               (let [x (first @params)]
+                 (swap! params rest)
+                 (pr-str x)))
+        :filter (fn [params]
+                  (let [x (first @params)]
+                    (swap! params rest)
+                    x))}))))
 
-(defmethod where-clause NullValue [nv url?]
-  (when url?
-    (throw (Exception. "not possible in url"))))
-
-(defmulti execute-sql* (fn [o & _] (type o)))
-
-(defn gimme-fields [expressions]
-  (mapcat #(if (instance? AllColumns %)
-             [:*]
-             (let [expr (.getExpression %)]
-               (if (instance? Function expr)
-                 (cons [(.toString expr)
-                        @(resolve (symbol (.toLowerCase (.getName expr))))]
-                       (map (fn [x] (keyword (where-clause x false)))
-                            (seq (.getExpressions (.getParameters expr)))))
-                 [(keyword
-                   (.getColumnName
-                    (.getExpression %)))])))
-          expressions))
-
-(defmethod execute-sql* Select [select api-key projects]
-  (let [body (.getSelectBody select)
-        table (.getName (first (.getFromItems body)))
-        table-id (get projects table)
-        fields (gimme-fields (.getSelectItems body))
-        where (.getWhere body)
-        url (when where
-              (try
-                (where-clause where true)
-                (catch Exception _ "")))
-        filter-fun (if where
-                     (eval `(fn [~'record]
-                              ~(where-clause where false)))
-                     (constantly true))
-        map-funs (filter vector? fields)
-        map-fun (if (seq map-funs)
-                  (apply juxt
-                         (map (fn [[name fun]]
-                                (fn [x]
-                                  {name (fun x)})) map-funs))
-                  identity)
-        fields (remove vector? fields)
-        select-fun (if (= [:*] fields)
-                     identity
-                     #(select-keys % fields))]
-    (result-set
-     (map-fun
-      (map select-fun
-           (filter filter-fun (project-stories api-key table-id url)))))))
-
-(declare execute-sql)
-
-(defmethod execute-sql* Update [update api-key projects]
-  (let [keys (map keyword (map where-clause (.getColumns update)))
-        values (map where-clause (.getExpressions update))
-        new-values (zipmap keys values)
-        table (.getName (.getTable update))
-        table-id (get projects table)
-        where (.getWhere update)
-        effected-stories (->> (format "SELECT id FROM %s WHERE %s"
-                                      table (.toString where))
-                              (execute-sql api-key projects)
-                              (map :id)
-                              (resultset-seq))]
-    (doseq [id effected-stories]
-      (http/put (doto (format story-url table-id id) prn)
-                {:headers {"X-Zen-ApiKey" api-key}
-                 :body (doto (json/encode new-values)
-                         println)}))
-    (result-set [{:rows (count effected-stories)}])))
-
-(defn execute-sql [statement api-key projects]
-  (execute-sql*
+(defn prepare-sql [sql]
+  (accept
    (.parse (CCJSqlParserManager.)
-           (java.io.StringReader. statement))
-   api-key
-   projects))
+           (java.io.StringReader. sql))))
 
 (defn prepared-statement [api-key statement projects]
   (let [statement (.replace statement "?" "%s")
@@ -216,9 +201,8 @@
     (reify
       PreparedStatement
       (executeQuery [_]
-        (let [params (map pr-str (map second (sort-by first @params)))
-              stmt (apply format statement params)]
-          (execute-sql stmt api-key projects)))
+        (let [params (map pr-str (map second (sort-by first @params)))]
+          (result-set ((prepare-sql statement) api-key params))))
       (setObject [_ idx value]
         (swap! params assoc idx value))
       (close [_]))))
