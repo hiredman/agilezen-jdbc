@@ -11,7 +11,9 @@
                                                Select SelectVisitor
                                                FromItemVisitor
                                                SelectItemVisitor
-                                               SelectExpressionItem)
+                                               SelectExpressionItem
+                                               OrderByVisitor
+                                               OrderByElement)
            (net.sf.jsqlparser.expression.operators.relational EqualsTo
                                                               NotEqualsTo)
            (net.sf.jsqlparser.expression.operators.conditional AndExpression
@@ -144,10 +146,26 @@
                             (constantly true))
                select-fun (if (=  columns [:*])
                             identity
-                            #(select-keys % columns))]
+                            #(select-keys % columns))
+               sort-keys (map keyword (map accept (.getOrderByElements ps)))
+               sort-fun (if (seq sort-keys)
+                          (partial sort (fn [a b]
+                                          (loop [[k & ks] sort-keys]
+                                            (let [i (compare (get a k)
+                                                             (get b k))]
+                                              (if (and (seq ks)
+                                                       (zero? i))
+                                                (recur ks)
+                                                i)))))
+                          identity)]
            (->> (project-stories api-key table-id where-url)
+                sort-fun
                 (filter filter-fun)
                 (map select-fun))))))
+
+    OrderByVisitor
+    (^void visit [vstr ^OrderByElement obe]
+      (p ((:filter (accept (.getColumnReference obe))) nil)))
 
     SelectItemVisitor
     (^void visit [vstr ^AllColumns sei]
