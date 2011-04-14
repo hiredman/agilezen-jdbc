@@ -164,6 +164,15 @@
                              (throw (Exception.)))
                            n)
                     :filter (fn [_] n)})))
+    (^void visit [vstr ^OrExpression eq]
+      (let [le (accept (.getLeftExpression eq))
+            re (accept (.getRightExpression eq))]
+        (deliver p {:url #(format "(%s) OR (%s)"
+                                  ((:url le) %)
+                                  ((:url re) %))
+                    :filter (fn [params]
+                              `(or ~((:filter le) params)
+                                  ~((:filter re) params)))})))
     (^void visit [vstr ^EqualsTo eq]
       (let [le (accept (.getLeftExpression eq))
             re (accept (.getRightExpression eq))]
