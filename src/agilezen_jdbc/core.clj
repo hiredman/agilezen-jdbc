@@ -172,7 +172,16 @@
                                   ((:url re) %))
                     :filter (fn [params]
                               `(or ~((:filter le) params)
-                                  ~((:filter re) params)))})))
+                                   ~((:filter re) params)))})))
+    (^void visit [vstr ^AndExpression eq]
+      (let [le (accept (.getLeftExpression eq))
+            re (accept (.getRightExpression eq))]
+        (deliver p {:url #(format "(%s) AND (%s)"
+                                  ((:url le) %)
+                                  ((:url re) %))
+                    :filter (fn [params]
+                              `(and ~((:filter le) params)
+                                    ~((:filter re) params)))})))
     (^void visit [vstr ^EqualsTo eq]
       (let [le (accept (.getLeftExpression eq))
             re (accept (.getRightExpression eq))]
